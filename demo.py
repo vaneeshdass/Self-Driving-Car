@@ -1,57 +1,72 @@
-import numpy as np
-import cv2
-import glob
-import matplotlib.pyplot as plt
 import pickle
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
-# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-objp = np.zeros((6 * 8, 3), np.float32)
-objp[:, :2] = np.mgrid[0:8, 0:6].T.reshape(-1, 2)
+# Read in the saved camera matrix and distortion coefficients
+# These are the arrays you calculated using cv2.calibrateCamera()
+dist_pickle = pickle.load(open("wide_dist_pickle.p", "rb"))
+mtx = dist_pickle["mtx"]
+dist = dist_pickle["dist"]
 
-# Arrays to store object points and image points from all the images.
-objpoints = []  # 3d points in real world space
-imgpoints = []  # 2d points in image plane.
-
-# Make a list of calibration images
-images = glob.glob('calibration_wide/GO*.jpg')
-
-# Step through the list and search for chessboard corners
-for idx, fname in enumerate(images):
-    img = cv2.imread(fname)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Find the chessboard corners
-    ret, corners = cv2.findChessboardCorners(gray, (8, 6), None)
-
-    # If found, add object points, image points
-    if ret == True:
-        objpoints.append(objp)
-        imgpoints.append(corners)
-
-        # Draw and display the corners
-#      import pickle
+# Read in an image
+img = cv2.imread('test_image2.png')
+nx = 8  # the number of inside corners in x
+ny = 6  # the number of inside corners in y
 
 
-# Test undistortion on an image
-img = cv2.imread('calibration_wide/test_image.jpg')
-img_size = (img.shape[1], img.shape[0])
+# MODIFY THIS FUNCTION TO GENERATE OUTPUT
+# THAT LOOKS LIKE THE IMAGE ABOVE
+def corners_unwarp(img, nx, ny, mtx, dist):
+    # Pass in your image into this function
+    # Write code to do the following steps
+    # 1) Undistort using mtx and dist
+    undst = cv2.undistort(img, mtx, dist, None, mtx)
+    # 2) Convert to grayscale
+    gray = cv2.cvtColor(undst, cv2.COLOR_BGR2GRAY)
+    # 3) Find the chessboard corners
+    ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+    # 4) If corners found:
+    if ret:
+        # a) draw corners
+        img = cv2.drawChessboardCorners(undst, (nx, ny), corners, ret)
+        # b) define 4 source points src = np.float32([[,],[,],[,],[,]])
+        rect_1_pts = corners[9].ravel()
+        rect_2_pts = corners[17].ravel()
+        rect_3_pts = corners[15].ravel()
+        rect_4_pts = corners[23].ravel()
 
-# Do camera calibration given object points and image points
-# objpoints & imgpoints have coordinates for all the images
-ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img_size, None, None)
+        src = np.float32([rect_1_pts,
+                          rect_2_pts,
+                          rect_3_pts,
+                          rect_4_pts])
 
-dst = cv2.undistort(img, mtx, dist, None, mtx)
-cv2.imwrite('calibration_wide/test_undist.jpg', dst)
+        # Note: you could pick any four of the detected corners
+        # as long as those four corners define a rectangle
+        # One especially smart way to do this would be to use four well-chosen
+        # corners that were automatically detected during the undistortion steps
+        # We recommend using the automatic detection of corners in your code
+        # c) define 4 destination points dst = np.float32([[,],[,],[,],[,]])
 
-# Save the camera calibration result for later use (we won't worry about rvecs / tvecs)
-dist_pickle = {}
-dist_pickle["mtx"] = mtx
-dist_pickle["dist"] = dist
-pickle.dump(dist_pickle, open("wide_dist_pickle.p", "wb"))
-# dst = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
-# Visualize undistortion
-f, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
+        dst = np.float32([[rect_1_pts[0], rect_1_pts[1]],
+                          [rect_1_pts[0], rect_2_pts[1]],
+                          [rect_3_pts[0], rect_1_pts[1]],
+                          [rect_3_pts[0], rect_2_pts[1]]])
+        # d) use cv2.getPerspectiveTransform() to get M, the transform matrix
+        M = cv2.getPerspectiveTransform(src, dst)
+        # e) use cv2.warpPerspective() to warp your image to a top-down view
+        warped = cv2.warpPerspective(undst, M, img.shape[1::-1], flags=cv2.INTER_LINEAR)
+
+    return warped, M
+
+
+top_down, perspective_M = corners_unwarp(img, nx, ny, mtx, dist)
+f, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 9))
+f.tight_layout()
 ax1.imshow(img)
-ax1.set_title('Original Image', fontsize=30)
-ax2.imshow(dst)
-ax2.set_title('Undistorted Image', fontsize=30)
+ax1.set_title('Original Image', fontsize=50)
+ax2.imshow(top_down)
+ax2.set_title('Undistorted and Warped Image', fontsize=50)
+plt.subplots_adjust(left=0., right=1, top=0.9, bottom=0.)
+f.show()
